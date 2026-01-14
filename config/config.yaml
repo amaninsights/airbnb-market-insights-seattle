@@ -1,0 +1,47 @@
+# Airbnb Market Insights - Seattle
+# =================================
+# Configuration file for the analytics pipeline
+
+project:
+  name: "Airbnb Market Insights - Seattle"
+  version: "2.0.0"
+  author: "Aman Saroha"
+  description: "End-to-end analytics pipeline for Seattle Airbnb market analysis"
+
+# Data Sources
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  kaggle_dataset: "airbnb/seattle"
+  files:
+    listings: "listings.csv"
+    calendar: "calendar.csv"
+    reviews: "reviews.csv"
+
+# Database Configuration
+database:
+  type: "sqlite"
+  path: "data/processed/airbnb_seattle.db"
+
+# Analysis Parameters
+analysis:
+  price_outlier_threshold: 3  # Standard deviations
+  min_reviews: 5
+  occupancy_threshold: 0.5
+  top_neighborhoods_count: 10
+  seasonal_months:
+    peak: [6, 7, 8]  # Summer
+    off_peak: [1, 2, 11, 12]  # Winter
+
+# Visualization Settings
+visualization:
+  style: "seaborn-v0_8-whitegrid"
+  figure_dpi: 300
+  color_palette: "Set2"
+  map_style: "cartodbpositron"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/pipeline.log"
