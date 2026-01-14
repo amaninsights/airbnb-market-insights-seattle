@@ -18,8 +18,8 @@ Version: 2.0.0
 __version__ = "2.0.0"
 __author__ = "Aman Saroha"
 
-from src.data import loader, transformer
 from src.analysis import market_analysis
+from src.data import loader, transformer
 from src.visualization import charts
 
 __all__ = ["loader", "transformer", "market_analysis", "charts"]

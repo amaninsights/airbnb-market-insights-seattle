@@ -11,9 +11,7 @@ Example Usage:
     >>> enriched_df = transformer.transform()
 """
 
-import logging
-import re
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -141,7 +139,7 @@ class AirbnbTransformer:
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         df[numeric_cols] = df[numeric_cols].fillna(0)
 
-        logger.info(f"Cleaned: {original_len} → {len(df)} listings")
+        logger.info(f"Cleaned: {original_len} -> {len(df)} listings")
         return df
 
     def add_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -478,7 +476,7 @@ def main():
     transformer = AirbnbTransformer(listings, calendar, reviews)
     df = transformer.transform()
 
-    print(f"\n📊 Transformed Data:")
+    print("\n Transformed Data:")
     print(f"  Listings: {len(df):,}")
     print(f"  Features: {len(df.columns)}")
     print(f"\n  Columns: {list(df.columns)}")

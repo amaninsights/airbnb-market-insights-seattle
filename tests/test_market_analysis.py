@@ -6,7 +6,6 @@ Unit tests for MarketAnalyzer class.
 """
 
 import pandas as pd
-import pytest
 
 from src.analysis.market_analysis import MarketAnalyzer, MarketInsights
 

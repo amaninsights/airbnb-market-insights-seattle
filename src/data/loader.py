@@ -12,13 +12,10 @@ Example Usage:
     >>> loader.ingest_all()
 """
 
-import os
-import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional
 
 import pandas as pd
-import numpy as np
 import yaml
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -30,45 +27,26 @@ logger = setup_logger(__name__)
 
 class AirbnbDataLoader:
     """
-    Production-grade data loader for Seattle Airbnb datasets.
+    Data loader for Seattle Airbnb datasets.
 
-    Handles:
-    - Loading CSV files with proper data types
-    - Date parsing and validation
-    - SQLite database ingestion
-    - Schema validation
+    Handles CSV file loading, data validation, and SQLite database ingestion.
+    Supports configurable file paths and database connections.
 
     Attributes:
-        config (dict): Configuration from YAML file
-        engine (Engine): SQLAlchemy database engine
+        config: Configuration dictionary
+        engine: SQLAlchemy database engine
+        data_dir: Path to raw data directory
     """
 
-    # Expected columns for validation
-    LISTINGS_COLUMNS = [
+    REQUIRED_LISTING_COLUMNS = [
         "id",
         "name",
         "host_id",
-        "host_name",
-        "neighbourhood_group",
         "neighbourhood",
         "latitude",
         "longitude",
         "room_type",
         "price",
-        "minimum_nights",
-        "number_of_reviews",
-        "availability_365",
-    ]
-
-    CALENDAR_COLUMNS = ["listing_id", "date", "available", "price"]
-
-    REVIEWS_COLUMNS = [
-        "listing_id",
-        "id",
-        "date",
-        "reviewer_id",
-        "reviewer_name",
-        "comments",
     ]
 
     def __init__(self, config_path: str = "config/config.yaml"):
@@ -81,7 +59,7 @@ class AirbnbDataLoader:
         self.config = self._load_config(config_path)
         self.engine = self._create_engine()
         self.data_dir = Path(self.config.get("data", {}).get("raw_dir", "data/raw"))
-        logger.info(f"AirbnbDataLoader initialized")
+        logger.info("AirbnbDataLoader initialized")
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -211,102 +189,117 @@ class AirbnbDataLoader:
 
     def _clean_price(self, price_series: pd.Series) -> pd.Series:
         """
-        Clean price column by removing $ and commas.
+        Clean price column by removing currency symbols.
 
         Args:
-            price_series: Series with price values
+            price_series: Series containing price values
 
         Returns:
             Cleaned numeric price series
         """
         if price_series.dtype == "object":
-            return pd.to_numeric(
-                price_series.astype(str).str.replace("[$,]", "", regex=True),
-                errors="coerce",
+            return (
+                price_series.replace(r"[\$,]", "", regex=True)
+                .replace("", "0")
+                .astype(float)
             )
         return price_series
 
-    def ingest_to_db(
-        self, df: pd.DataFrame, table_name: str, if_exists: str = "replace"
-    ) -> int:
+    def validate_listings(self, df: pd.DataFrame) -> bool:
         """
-        Ingest DataFrame into SQLite database.
+        Validate listings DataFrame has required columns.
+
+        Args:
+            df: DataFrame to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        missing = set(self.REQUIRED_LISTING_COLUMNS) - set(df.columns)
+        if missing:
+            logger.error(f"Missing required columns: {missing}")
+            return False
+        return True
+
+    def ingest_to_database(self, df: pd.DataFrame, table_name: str) -> int:
+        """
+        Ingest DataFrame to SQLite database.
 
         Args:
             df: DataFrame to ingest
             table_name: Target table name
-            if_exists: How to handle existing table
 
         Returns:
             Number of rows inserted
         """
-        logger.info(f"Ingesting {len(df):,} rows into table: {table_name}")
+        if df.empty:
+            logger.warning(f"Empty DataFrame, skipping {table_name} ingestion")
+            return 0
 
-        rows = df.to_sql(table_name, self.engine, if_exists=if_exists, index=False)
-
-        logger.info(f"Successfully ingested into {table_name}")
-        return rows or len(df)
+        df.to_sql(table_name, self.engine, if_exists="replace", index=False)
+        logger.info(f"Ingested {len(df):,} rows to {table_name}")
+        return len(df)
 
     def ingest_all(self) -> Dict[str, int]:
         """
-        Load and ingest all data files to database.
+        Load and ingest all datasets to database.
 
         Returns:
-            Dictionary mapping table names to row counts
+            Dictionary with table names and row counts
         """
         results = {}
 
-        # Listings
-        df = self.load_listings()
-        if not df.empty:
-            results["listings"] = self.ingest_to_db(df, "listings")
+        listings = self.load_listings()
+        if not listings.empty and self.validate_listings(listings):
+            results["listings"] = self.ingest_to_database(listings, "listings")
 
-        # Calendar
-        df = self.load_calendar()
-        if not df.empty:
-            results["calendar"] = self.ingest_to_db(df, "calendar")
+        calendar = self.load_calendar()
+        if not calendar.empty:
+            results["calendar"] = self.ingest_to_database(calendar, "calendar")
 
-        # Reviews
-        df = self.load_reviews()
-        if not df.empty:
-            results["reviews"] = self.ingest_to_db(df, "reviews")
+        reviews = self.load_reviews()
+        if not reviews.empty:
+            results["reviews"] = self.ingest_to_database(reviews, "reviews")
 
         logger.info(f"Ingestion complete: {results}")
         return results
 
-    def query(self, sql: str) -> pd.DataFrame:
-        """Execute SQL query and return results."""
-        return pd.read_sql(sql, self.engine)
-
-    def get_sample_data(self, n: int = 1000) -> Dict[str, pd.DataFrame]:
+    def get_from_database(self, table_name: str) -> pd.DataFrame:
         """
-        Get sample data for testing/development.
+        Load data from database table.
 
         Args:
-            n: Number of rows to sample
+            table_name: Name of table to load
 
         Returns:
-            Dictionary of sampled DataFrames
+            DataFrame with table data
         """
-        return {
-            "listings": self.load_listings().head(n),
-            "calendar": self.load_calendar().head(n),
-            "reviews": self.load_reviews().head(n),
-        }
+        query = f"SELECT * FROM {table_name}"
+        try:
+            df = pd.read_sql(query, self.engine)
+            logger.info(f"Loaded {len(df):,} rows from {table_name}")
+            return df
+        except Exception as e:
+            logger.error(f"Failed to load {table_name}: {e}")
+            return pd.DataFrame()
 
 
 def main():
     """Example usage of AirbnbDataLoader."""
-    loader = AirbnbDataLoader()
+    loader = AirbnbDataLoader("config/config.yaml")
 
-    # Load all data
-    results = loader.ingest_all()
+    # Load datasets
+    listings = loader.load_listings()
+    calendar = loader.load_calendar()
+    reviews = loader.load_reviews()
 
-    print("\n📊 Ingestion Summary:")
-    print("-" * 40)
-    for table, rows in results.items():
-        print(f"  {table}: {rows:,} rows")
-    print("-" * 40)
+    print("\n Data Loaded:")
+    print(f"  Listings: {len(listings):,}")
+    print(f"  Calendar: {len(calendar):,}")
+    print(f"  Reviews: {len(reviews):,}")
+
+    if not listings.empty:
+        print(f"\n  Columns: {list(listings.columns)}")
 
 
 if __name__ == "__main__":

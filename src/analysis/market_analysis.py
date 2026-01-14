@@ -11,9 +11,8 @@ Example Usage:
     >>> insights = analyzer.get_market_insights()
 """
 
-import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -26,37 +25,35 @@ logger = setup_logger(__name__)
 
 @dataclass
 class MarketInsights:
-    """Data class for market insights summary."""
+    """Container for market insights."""
 
     total_listings: int
     total_hosts: int
     avg_price: float
     median_price: float
-    avg_occupancy: float
-    top_neighborhood: str
-    dominant_room_type: str
     price_range: Tuple[float, float]
+    top_neighborhood: str
+    most_common_room_type: str
+    dominant_room_type: str
+    avg_occupancy: float
     seasonal_premium: float
 
 
 class MarketAnalyzer:
     """
-    Comprehensive market analyzer for Airbnb data.
+    Production-grade market analyzer for Airbnb data.
 
     Provides:
-    - Price analysis and recommendations
-    - Neighborhood comparison
+    - Market overview statistics
+    - Pricing analysis
+    - Neighborhood rankings
     - Seasonal trend analysis
     - Competitive positioning
-    - Revenue estimation
-
-    Attributes:
-        df (pd.DataFrame): Listings data
     """
 
     def __init__(self, df: pd.DataFrame):
         """
-        Initialize MarketAnalyzer with listings data.
+        Initialize analyzer with data.
 
         Args:
             df: Transformed listings DataFrame
@@ -71,72 +68,70 @@ class MarketAnalyzer:
         Returns:
             MarketInsights dataclass with key metrics
         """
-        logger.info("Generating market insights")
+        df = self.df
 
-        # Basic metrics
-        total_listings = len(self.df)
-        total_hosts = (
-            self.df["host_id"].nunique() if "host_id" in self.df.columns else 0
+        # Basic counts
+        total_listings = len(df)
+        total_hosts = df["host_id"].nunique() if "host_id" in df.columns else 0
+
+        # Price metrics
+        avg_price = df["price"].mean() if "price" in df.columns else 0
+        median_price = df["price"].median() if "price" in df.columns else 0
+        price_range = (
+            (df["price"].min(), df["price"].max()) if "price" in df.columns else (0, 0)
         )
-        avg_price = self.df["price"].mean() if "price" in self.df.columns else 0
-        median_price = self.df["price"].median() if "price" in self.df.columns else 0
+
+        # Top neighborhood by average price
+        top_neighborhood = "N/A"
+        if "neighbourhood" in df.columns and "price" in df.columns:
+            neighborhood_prices = df.groupby("neighbourhood")["price"].mean()
+            top_neighborhood = neighborhood_prices.idxmax()
+
+        # Room type analysis
+        most_common_room = "N/A"
+        dominant_room = "N/A"
+        if "room_type" in df.columns:
+            room_counts = df["room_type"].value_counts()
+            most_common_room = room_counts.index[0]
+            dominant_room = most_common_room
 
         # Occupancy
-        avg_occupancy = 0
-        if "occupancy_rate" in self.df.columns:
-            avg_occupancy = self.df["occupancy_rate"].mean()
-        elif "availability_365" in self.df.columns:
-            avg_occupancy = 1 - (self.df["availability_365"].mean() / 365)
-
-        # Top neighborhood
-        top_neighborhood = "Unknown"
-        if "neighbourhood" in self.df.columns:
-            top_neighborhood = self.df.groupby("neighbourhood")["price"].mean().idxmax()
-
-        # Dominant room type
-        dominant_room_type = "Unknown"
-        if "room_type" in self.df.columns:
-            dominant_room_type = self.df["room_type"].mode().iloc[0]
-
-        # Price range
-        price_range = (0.0, 0.0)
-        if "price" in self.df.columns:
-            price_range = (self.df["price"].min(), self.df["price"].max())
+        avg_occupancy = 0.0
+        if "occupancy_rate" in df.columns:
+            avg_occupancy = df["occupancy_rate"].mean()
+        elif "availability_365" in df.columns:
+            avg_occupancy = 1 - (df["availability_365"].mean() / 365)
 
         # Seasonal premium
         seasonal_premium = 0.0
-        if (
-            "summer_occupancy" in self.df.columns
-            and "winter_occupancy" in self.df.columns
-        ):
-            summer_avg = self.df["summer_occupancy"].mean()
-            winter_avg = self.df["winter_occupancy"].mean()
-            if winter_avg > 0:
-                seasonal_premium = (summer_avg - winter_avg) / winter_avg * 100
+        if "summer_occupancy" in df.columns and "winter_occupancy" in df.columns:
+            summer_occ = df["summer_occupancy"].mean()
+            winter_occ = df["winter_occupancy"].mean()
+            if winter_occ > 0:
+                seasonal_premium = ((summer_occ - winter_occ) / winter_occ) * 100
 
         return MarketInsights(
             total_listings=total_listings,
             total_hosts=total_hosts,
             avg_price=avg_price,
             median_price=median_price,
-            avg_occupancy=avg_occupancy,
-            top_neighborhood=top_neighborhood,
-            dominant_room_type=dominant_room_type,
             price_range=price_range,
+            top_neighborhood=top_neighborhood,
+            most_common_room_type=most_common_room,
+            dominant_room_type=dominant_room,
+            avg_occupancy=avg_occupancy,
             seasonal_premium=seasonal_premium,
         )
 
-    def analyze_pricing(self) -> Dict[str, any]:
+    def analyze_pricing(self) -> Dict:
         """
-        Detailed price analysis.
+        Perform detailed price analysis.
 
         Returns:
-            Dictionary with pricing insights
+            Dictionary with pricing statistics
         """
         if "price" not in self.df.columns:
-            return {"error": "Price column not found"}
-
-        logger.info("Analyzing pricing")
+            return {}
 
         price = self.df["price"]
 
@@ -151,18 +146,18 @@ class MarketAnalyzer:
                 "50th": price.quantile(0.50),
                 "75th": price.quantile(0.75),
                 "90th": price.quantile(0.90),
-                "99th": price.quantile(0.99),
+                "95th": price.quantile(0.95),
             },
             "skewness": price.skew(),
             "kurtosis": price.kurtosis(),
         }
 
-        # Price distribution by room type
+        # Price by room type
         if "room_type" in self.df.columns:
             analysis["by_room_type"] = (
                 self.df.groupby("room_type")["price"]
                 .agg(["mean", "median", "count"])
-                .to_dict("index")
+                .to_dict()
             )
 
         return analysis
@@ -180,119 +175,114 @@ class MarketAnalyzer:
         if "neighbourhood" not in self.df.columns:
             return pd.DataFrame()
 
-        logger.info(f"Analyzing top {top_n} neighborhoods")
+        # Aggregate by neighborhood
+        agg_funcs = {"price": ["mean", "median", "count", "std"]}
 
-        neighborhood_stats = self.df.groupby("neighbourhood").agg(
-            {
-                "id": "count",
-                "price": ["mean", "median", "std"],
-                "number_of_reviews": (
-                    "sum" if "number_of_reviews" in self.df.columns else "count"
-                ),
-            }
+        if "number_of_reviews" in self.df.columns:
+            agg_funcs["number_of_reviews"] = "sum"
+
+        if "occupancy_rate" in self.df.columns:
+            agg_funcs["occupancy_rate"] = "mean"
+
+        neighborhood_stats = self.df.groupby("neighbourhood").agg(agg_funcs)
+
+        # Flatten column names
+        neighborhood_stats.columns = (
+            [
+                "avg_price",
+                "median_price",
+                "listing_count",
+                "price_std",
+            ]
+            + (["total_reviews"] if "number_of_reviews" in self.df.columns else [])
+            + (["avg_occupancy"] if "occupancy_rate" in self.df.columns else [])
         )
 
-        neighborhood_stats.columns = [
-            "listing_count",
-            "avg_price",
-            "median_price",
-            "price_std",
-            "total_reviews",
-        ]
-
-        # Calculate market share
-        neighborhood_stats["market_share"] = (
-            neighborhood_stats["listing_count"]
-            / neighborhood_stats["listing_count"].sum()
-            * 100
-        )
-
-        # Calculate revenue potential score
-        neighborhood_stats["revenue_score"] = neighborhood_stats["avg_price"] * (
-            neighborhood_stats["total_reviews"] / neighborhood_stats["listing_count"]
-        )
-
-        # Rank by revenue score
-        neighborhood_stats["rank"] = neighborhood_stats["revenue_score"].rank(
+        # Add rank
+        neighborhood_stats["rank"] = neighborhood_stats["avg_price"].rank(
             ascending=False
         )
 
-        return neighborhood_stats.sort_values("rank").head(top_n).reset_index()
+        # Sort and get top N
+        result = (
+            neighborhood_stats.sort_values("avg_price", ascending=False)
+            .head(top_n)
+            .reset_index()
+        )
 
-    def analyze_seasonality(self, calendar_df: Optional[pd.DataFrame] = None) -> Dict:
+        return result
+
+    def analyze_seasonality(self) -> Dict:
         """
         Analyze seasonal patterns in the market.
-
-        Args:
-            calendar_df: Optional calendar DataFrame
 
         Returns:
             Dictionary with seasonal analysis
         """
-        logger.info("Analyzing seasonality")
+        result = {}
 
-        analysis = {
-            "has_seasonal_data": False,
-            "peak_season": "Summer (Jun-Aug)",
-            "off_peak_season": "Winter (Dec-Feb)",
-        }
-
-        # If we have seasonal columns
+        # Occupancy seasonality
         if "summer_occupancy" in self.df.columns:
-            analysis["has_seasonal_data"] = True
-            analysis["summer_avg_occupancy"] = self.df["summer_occupancy"].mean()
-            analysis["winter_avg_occupancy"] = self.df["winter_occupancy"].mean()
-            analysis["seasonal_variation"] = (
-                analysis["summer_avg_occupancy"] - analysis["winter_avg_occupancy"]
+            result["summer_occupancy"] = self.df["summer_occupancy"].mean()
+
+        if "winter_occupancy" in self.df.columns:
+            result["winter_occupancy"] = self.df["winter_occupancy"].mean()
+
+        if "summer_occupancy" in result and "winter_occupancy" in result:
+            result["seasonal_variation"] = (
+                (result["summer_occupancy"] - result["winter_occupancy"])
+                / result["winter_occupancy"]
+                * 100
+                if result["winter_occupancy"] > 0
+                else 0
             )
 
-        return analysis
+        return result
 
     def get_competitive_position(
         self, price: float, neighborhood: str, room_type: str
-    ) -> Dict[str, any]:
+    ) -> Dict:
         """
         Determine competitive position for a listing.
 
         Args:
             price: Listing price
             neighborhood: Neighborhood name
-            room_type: Type of room
+            room_type: Room type
 
         Returns:
-            Dictionary with competitive positioning
+            Dictionary with competitive analysis
         """
-        logger.info(f"Analyzing competitive position: {neighborhood}, {room_type}")
-
-        # Filter to comparable listings
-        comparable = self.df[
+        # Filter comparables
+        comparables = self.df[
             (self.df["neighbourhood"] == neighborhood)
-            & (self.df["room_type"] == room_type)
+            | (self.df["room_type"].str.contains(room_type, case=False, na=False))
         ]
 
-        if comparable.empty:
+        if len(comparables) == 0:
             return {"error": "No comparable listings found"}
 
-        comp_prices = comparable["price"]
+        market_prices = comparables["price"]
 
-        percentile = stats.percentileofscore(comp_prices, price)
+        # Calculate position
+        percentile = stats.percentileofscore(market_prices, price)
+        price_vs_avg = ((price - market_prices.mean()) / market_prices.mean()) * 100
 
-        position = {
+        return {
+            "price": price,
             "neighborhood": neighborhood,
             "room_type": room_type,
-            "your_price": price,
-            "market_avg": comp_prices.mean(),
-            "market_median": comp_prices.median(),
+            "comparable_count": len(comparables),
+            "market_avg": market_prices.mean(),
+            "market_median": market_prices.median(),
             "price_percentile": percentile,
-            "comparable_count": len(comparable),
-            "price_position": self._get_price_position(percentile),
-            "recommendation": self._get_price_recommendation(price, comp_prices),
+            "price_vs_average": price_vs_avg,
+            "position": self._get_position_label(percentile),
+            "recommendation": self._get_price_recommendation(price, market_prices),
         }
 
-        return position
-
-    def _get_price_position(self, percentile: float) -> str:
-        """Categorize price position based on percentile."""
+    def _get_position_label(self, percentile: float) -> str:
+        """Get position label from percentile."""
         if percentile <= 25:
             return "Budget (Bottom 25%)"
         elif percentile <= 50:
@@ -305,13 +295,16 @@ class MarketAnalyzer:
     def _get_price_recommendation(self, price: float, market_prices: pd.Series) -> str:
         """Generate price recommendation."""
         median = market_prices.median()
+        diff = price - median
 
         if price < median * 0.8:
             return (
                 f"Consider increasing price. You're 20%+ below median (${median:.0f})"
             )
         elif price > median * 1.5:
-            return f"Price is premium. Ensure quality justifies ${price-median:.0f} above median"
+            return (
+                f"Price is premium. Ensure quality justifies ${diff:.0f} above median"
+            )
         else:
             return "Price is competitive within market range"
 
@@ -388,26 +381,27 @@ class MarketAnalyzer:
         insights = self.get_market_insights()
 
         report = f"""
-╔══════════════════════════════════════════════════════════════╗
-║           SEATTLE AIRBNB MARKET ANALYSIS REPORT              ║
-╠══════════════════════════════════════════════════════════════╣
-║ MARKET OVERVIEW                                              ║
-║   Total Listings: {insights.total_listings:>40,}║
-║   Total Hosts: {insights.total_hosts:>44,}║
-║   Average Price: ${insights.avg_price:>41,.2f}║
-║   Median Price: ${insights.median_price:>42,.2f}║
-╠══════════════════════════════════════════════════════════════╣
-║ KEY INSIGHTS                                                 ║
-║   Top Neighborhood: {insights.top_neighborhood:>38}║
-║   Dominant Room Type: {insights.dominant_room_type:>36}║
-║   Avg Occupancy Rate: {insights.avg_occupancy*100:>34.1f}%║
-║   Seasonal Premium: {insights.seasonal_premium:>37.1f}%║
-╠══════════════════════════════════════════════════════════════╣
-║ PRICE RANGE                                                  ║
-║   Minimum: ${insights.price_range[0]:>47,.2f}║
-║   Maximum: ${insights.price_range[1]:>47,.2f}║
-╚══════════════════════════════════════════════════════════════╝
-"""
+===============================================================
+           SEATTLE AIRBNB MARKET ANALYSIS REPORT
+===============================================================
+
+ MARKET OVERVIEW
+   Total Listings: {insights.total_listings:>40,}
+   Total Hosts: {insights.total_hosts:>44,}
+   Average Price: ${insights.avg_price:>41,.2f}
+   Median Price: ${insights.median_price:>42,.2f}
+
+ KEY INSIGHTS
+   Top Neighborhood: {insights.top_neighborhood:>38}
+   Dominant Room Type: {insights.dominant_room_type:>36}
+   Avg Occupancy Rate: {insights.avg_occupancy*100:>34.1f}%
+   Seasonal Premium: {insights.seasonal_premium:>37.1f}%
+
+ PRICE RANGE
+   Minimum: ${insights.price_range[0]:>47,.2f}
+   Maximum: ${insights.price_range[1]:>47,.2f}
+===============================================================
+        """
         return report
 
 
@@ -429,7 +423,7 @@ def main():
     print(analyzer.generate_report())
 
     # Top neighborhoods
-    print("\n🏆 Top 10 Neighborhoods:")
+    print("\n Top 10 Neighborhoods:")
     print(analyzer.analyze_neighborhoods(10))
 
 

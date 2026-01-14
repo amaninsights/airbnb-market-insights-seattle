@@ -5,10 +5,6 @@ Test Data Transformer
 Unit tests for AirbnbTransformer class.
 """
 
-import numpy as np
-import pandas as pd
-import pytest
-
 from src.data.transformer import AirbnbTransformer
 
 
